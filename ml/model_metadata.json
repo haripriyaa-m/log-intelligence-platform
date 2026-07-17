@@ -1,0 +1,12 @@
+{
+  "features": [
+    "total_logs",
+    "error_count",
+    "fatal_count",
+    "warn_count",
+    "error_rate",
+    "avg_severity",
+    "logs_per_second"
+  ],
+  "n_features": 7
+}
