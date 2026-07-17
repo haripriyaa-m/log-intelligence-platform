@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-API = "http://localhost:8000"
+API = "https://log-intelligence-dashboard.onrender.com"
 
 SEVERITY_COLORS = {"critical": "#ef4444", "warning": "#f59e0b"}
 SOURCE_ICONS    = {"rules": "📋", "ml": "🤖"}

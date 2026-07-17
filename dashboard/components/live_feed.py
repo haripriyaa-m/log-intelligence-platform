@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API = "http://localhost:8000"
+API = "https://log-intelligence-dashboard.onrender.com"
 
 LEVEL_COLORS = {
     "INFO":    "#6b7280",
