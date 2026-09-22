@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from collections import defaultdict
 
-API = "https://log-intelligence-dashboard.onrender.com"
+API = "https://log-intelligence-platform.onrender.com"
 
 SERVICE_COLORS = {
     "payments":    "#3b82f6",
