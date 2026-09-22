@@ -8,7 +8,7 @@ on:
 
 jobs:
 
-  # ── Job 1: Run tests ────────────────────────────────────────────────────────
+  # ── Job 1: Run tests ──────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +28,7 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v || echo "No tests yet — skipping"
 
-  # ── Job 2: Build and push Docker images ────────────────────────────────────
+  # ── Job 2: Build and push Docker images ──────────────────────────────
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
@@ -60,7 +60,7 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/log-intelligence-dashboard:latest
 
-  # ── Job 3: Deploy to Render ─────────────────────────────────────────────────
+  # ── Job 3: Deploy to Render ─────────────────────────────────────────
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
