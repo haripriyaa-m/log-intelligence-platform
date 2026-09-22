@@ -33,14 +33,12 @@ def get_pg_connection():
 
 def get_redis_connection():
     import os
-    password = os.getenv("REDIS_PASSWORD")
-    ssl = os.getenv("REDIS_SSL", "false").lower() == "true"
-    
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        return redis.from_url(redis_url, decode_responses=True)
     return redis.Redis(
         host=REDIS_HOST,
         port=REDIS_PORT,
-        password=password,
-        ssl=ssl,
         decode_responses=True,
     )
 
