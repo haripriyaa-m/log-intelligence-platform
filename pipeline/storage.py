@@ -32,12 +32,17 @@ def get_pg_connection():
 
 
 def get_redis_connection():
-    """
-    decode_responses=True means Redis returns Python strings
-    instead of bytes — much easier to work with.
-    """
-    return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-
+    import os
+    password = os.getenv("REDIS_PASSWORD")
+    ssl = os.getenv("REDIS_SSL", "false").lower() == "true"
+    
+    return redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        password=password,
+        ssl=ssl,
+        decode_responses=True,
+    )
 
 def init_database(conn):
     """
