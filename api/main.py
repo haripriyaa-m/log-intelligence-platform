@@ -18,6 +18,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def on_startup():
+    """Create database tables if they don't exist."""
+    try:
+        conn = pg_db.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS logs (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP NOT NULL,
+                service VARCHAR(50) NOT NULL,
+                level VARCHAR(10) NOT NULL,
+                severity_weight INT NOT NULL,
+                message TEXT NOT NULL,
+                transaction_id VARCHAR(50),
+                user_id VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id SERIAL PRIMARY KEY,
+                service VARCHAR(50) NOT NULL,
+                rule VARCHAR(100),
+                severity VARCHAR(20) NOT NULL,
+                reason TEXT NOT NULL,
+                source VARCHAR(20) NOT NULL,
+                anomaly_score FLOAT,
+                stats JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_service ON logs(service);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_service ON alerts(service);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at);")
+        conn.commit()
+        conn.close()
+        print("✅ Database tables ready")
+    except Exception as e:
+        print(f"⚠️ Database init error: {e}")
+
 # Register all route groups
 app.include_router(services.router)
 app.include_router(alerts.router)
