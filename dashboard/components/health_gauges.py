@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API = "https://log-intelligence-dashboard.onrender.com"
+API = "https://log-intelligence-platform.onrender.com"
 
 STATUS_COLORS = {
     "healthy":  "#22c55e",
