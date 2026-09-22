@@ -40,8 +40,7 @@ def create_consumer():
 def run():
     print("🔧 Initializing pipeline...")
 
-    pg_conn = storage.get_pg_connection()
-    storage.init_database(pg_conn)
+    storage.init_database()
     r = storage.get_redis_connection()
 
     aggregator = RollingAggregator(window_seconds=60)
@@ -60,7 +59,7 @@ def run():
         parsed = parse_log_line(raw_line, fallback_service=service)
 
         # 2. STORE raw log + push to live feed
-        storage.save_log(pg_conn, parsed)
+        storage.save_log(parsed)
         storage.push_recent_log(r, service, parsed)
 
         # 3. AGGREGATE
@@ -71,7 +70,7 @@ def run():
         # 4. RULE-BASED detection
         rule_anomaly = check_rules(service, stats)
 
-        # 5. ML-BASED detection (runs in parallel with rules)
+        # 5. ML-BASED detection
         ml_anomaly = None
         if ML_ENABLED:
             is_anomalous, ml_score = detector.is_anomalous(stats, ANOMALY_THRESHOLD)
@@ -83,14 +82,14 @@ def run():
                     "anomaly_score": ml_score,
                 }
 
-        # 6. SAVE ALERTS — rules and ML independently
+        # 6. SAVE ALERTS
         if rule_anomaly:
-            storage.save_alert(pg_conn, service, rule_anomaly, stats, source="rules")
+            storage.save_alert(service, rule_anomaly, stats, source="rules")
             storage.update_service_health(r, service, stats, rule_anomaly)
             print(f"🚨 [RULES] [{service}] {rule_anomaly['rule']} — {rule_anomaly['reason']}")
 
         if ml_anomaly:
-            storage.save_alert(pg_conn, service, ml_anomaly, stats, source="ml")
+            storage.save_alert(service, ml_anomaly, stats, source="ml")
             if not rule_anomaly:
                 storage.update_service_health(r, service, stats, ml_anomaly)
             print(f"🤖 [ML]    [{service}] score={ml_anomaly['anomaly_score']:.2f} — {ml_anomaly['reason']}")
