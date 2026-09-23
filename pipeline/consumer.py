@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import time
 from kafka import KafkaConsumer
 from dotenv import load_dotenv
 
@@ -14,14 +15,21 @@ from pipeline.rules import check_rules
 from pipeline import storage
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
-KAFKA_TOPIC  = os.getenv("KAFKA_TOPIC",  "log-events")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "log-events")
 ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.7"))
+
+# Keep an anomaly active for this many seconds
+ALERT_COOLDOWN_SECONDS = int(
+    os.getenv("ALERT_COOLDOWN_SECONDS", "60")
+)
 
 # Try to load the ML model — gracefully fall back if not trained yet
 try:
     from ml.inference import AnomalyDetector
+
     detector = AnomalyDetector()
     ML_ENABLED = True
+
 except FileNotFoundError:
     print("⚠️  ML model not found — running rules-only mode")
     ML_ENABLED = False
@@ -47,57 +55,199 @@ def run():
     consumer = create_consumer()
 
     mode = "rules + ML" if ML_ENABLED else "rules only"
+
     print(f"✅ Connected to Kafka — topic: {KAFKA_TOPIC}")
-    print(f"🚀 Pipeline running in [{mode}] mode. Press Ctrl+C to stop.\n")
+    print(f"🚀 Pipeline running in [{mode}] mode.")
+    print(
+        f"⏱️ Alert cooldown: {ALERT_COOLDOWN_SECONDS} seconds\n"
+    )
 
     for message in consumer:
+
         raw_message = message.value
-        service     = raw_message["service"]
-        raw_line    = raw_message["raw"]
+        service = raw_message["service"]
+        raw_line = raw_message["raw"]
 
         # 1. PARSE
-        parsed = parse_log_line(raw_line, fallback_service=service)
+        parsed = parse_log_line(
+            raw_line,
+            fallback_service=service
+        )
 
         # 2. STORE raw log + push to live feed
         storage.save_log(parsed)
-        storage.push_recent_log(r, service, parsed)
+        storage.push_recent_log(
+            r,
+            service,
+            parsed
+        )
 
         # 3. AGGREGATE
-        aggregator.add(service, parsed)
+        aggregator.add(
+            service,
+            parsed
+        )
+
         stats = aggregator.get_stats(service)
         stats["service"] = service
 
         # 4. RULE-BASED detection
-        rule_anomaly = check_rules(service, stats)
+        rule_anomaly = check_rules(
+            service,
+            stats
+        )
 
         # 5. ML-BASED detection
         ml_anomaly = None
+
         if ML_ENABLED:
-            is_anomalous, ml_score = detector.is_anomalous(stats, ANOMALY_THRESHOLD)
+
+            is_anomalous, ml_score = detector.is_anomalous(
+                stats,
+                ANOMALY_THRESHOLD
+            )
+
             if is_anomalous:
+
                 ml_anomaly = {
                     "rule": "ml_isolation_forest",
-                    "severity": "warning" if ml_score < 0.85 else "critical",
-                    "reason": f"ML anomaly score {ml_score:.2f} — unusual pattern detected",
+                    "severity": (
+                        "warning"
+                        if ml_score < 0.85
+                        else "critical"
+                    ),
+                    "reason": (
+                        f"ML anomaly score {ml_score:.2f} "
+                        f"— unusual pattern detected"
+                    ),
                     "anomaly_score": ml_score,
                 }
 
-        # 6. SAVE ALERTS
+        # Current time
+        now = time.time()
+
+        # ---------------------------------------------------------
+        # 6. ANOMALY DETECTED
+        # ---------------------------------------------------------
+
         if rule_anomaly:
-            storage.save_alert(service, rule_anomaly, stats, source="rules")
-            storage.update_service_health(r, service, stats, rule_anomaly)
-            print(f"🚨 [RULES] [{service}] {rule_anomaly['rule']} — {rule_anomaly['reason']}")
 
-        if ml_anomaly:
-            storage.save_alert(service, ml_anomaly, stats, source="ml")
-            if not rule_anomaly:
-                storage.update_service_health(r, service, stats, ml_anomaly)
-            print(f"🤖 [ML]    [{service}] score={ml_anomaly['anomaly_score']:.2f} — {ml_anomaly['reason']}")
+            rule_anomaly["active_until"] = (
+                now + ALERT_COOLDOWN_SECONDS
+            )
 
-        if not rule_anomaly and not ml_anomaly:
-            storage.update_service_health(r, service, stats, None)
-            print(f"   [{service}] {parsed['level']} — "
-                  f"error_rate={stats['error_rate']} logs/60s={stats['total_logs']}")
+            storage.save_alert(
+                service,
+                rule_anomaly,
+                stats,
+                source="rules"
+            )
+
+            storage.update_service_health(
+                r,
+                service,
+                stats,
+                rule_anomaly
+            )
+
+            print(
+                f"🚨 [RULES] [{service}] "
+                f"{rule_anomaly['rule']} — "
+                f"{rule_anomaly['reason']}"
+            )
+
+        elif ml_anomaly:
+
+            ml_anomaly["active_until"] = (
+                now + ALERT_COOLDOWN_SECONDS
+            )
+
+            storage.save_alert(
+                service,
+                ml_anomaly,
+                stats,
+                source="ml"
+            )
+
+            storage.update_service_health(
+                r,
+                service,
+                stats,
+                ml_anomaly
+            )
+
+            print(
+                f"🤖 [ML] [{service}] "
+                f"score={ml_anomaly['anomaly_score']:.2f} — "
+                f"{ml_anomaly['reason']}"
+            )
+
+        # ---------------------------------------------------------
+        # 7. NO NEW ANOMALY
+        # ---------------------------------------------------------
+        else:
+
+            existing_state = r.get(
+                f"health:{service}"
+            )
+
+            keep_existing_alert = False
+
+            if existing_state:
+
+                try:
+                    existing_state = json.loads(
+                        existing_state
+                    )
+
+                    existing_anomaly = existing_state.get(
+                        "active_anomaly"
+                    )
+
+                    if existing_anomaly:
+
+                        active_until = existing_anomaly.get(
+                            "active_until",
+                            0
+                        )
+
+                        if now < active_until:
+                            keep_existing_alert = True
+
+                            # Keep the existing anomaly active,
+                            # but update the latest statistics.
+                            storage.update_service_health(
+                                r,
+                                service,
+                                stats,
+                                existing_anomaly
+                            )
+
+                            print(
+                                f"🔴 [{service}] "
+                                f"Existing alert active "
+                                f"for another "
+                                f"{int(active_until - now)}s"
+                            )
+
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Only return to healthy after cooldown expires
+            if not keep_existing_alert:
+
+                storage.update_service_health(
+                    r,
+                    service,
+                    stats,
+                    None
+                )
+
+                print(
+                    f"   [{service}] {parsed['level']} — "
+                    f"error_rate={stats['error_rate']} "
+                    f"logs/60s={stats['total_logs']}"
+                )
 
 
 if __name__ == "__main__":
