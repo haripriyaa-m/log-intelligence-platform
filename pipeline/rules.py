@@ -15,7 +15,7 @@ returns either None (no anomaly) or a dict describing the anomaly.
 
 def check_payments_rules(stats: dict) -> dict | None:
     if stats["total_logs"] < 3:
-        return None  # not enough data yet to judge
+        return None
 
     if stats["fatal_count"] >= 3:
         return {
@@ -31,7 +31,7 @@ def check_payments_rules(stats: dict) -> dict | None:
             "reason": f"Error rate at {stats['error_rate']*100:.0f}% — payments failing",
         }
 
-    if stats["logs_per_second"] > 2.0:
+    if stats["logs_per_second"] > 0.8:
         return {
             "rule": "volume_spike",
             "severity": "warning",
@@ -45,14 +45,14 @@ def check_auth_rules(stats: dict) -> dict | None:
     if stats["total_logs"] < 3:
         return None
 
-    if stats["warn_count"] >= 10:
+    if stats["warn_count"] >= 6:
         return {
             "rule": "brute_force_attack",
             "severity": "critical",
             "reason": f"{stats['warn_count']} failed login attempts in last 60s",
         }
 
-    if stats["error_count"] >= 5:
+    if stats["error_count"] >= 3:
         return {
             "rule": "mass_lockout",
             "severity": "critical",
@@ -87,7 +87,7 @@ def check_database_rules(stats: dict) -> dict | None:
             "reason": f"{stats['error_count']} connection errors in last 60s",
         }
 
-    if stats["warn_count"] >= 40:
+    if stats["warn_count"] >= 8:
         return {
             "rule": "slow_query_pattern",
             "severity": "warning",
@@ -125,7 +125,6 @@ def check_api_gateway_rules(stats: dict) -> dict | None:
     return None
 
 
-# Maps service name to its rule-checking function
 RULE_CHECKERS = {
     "payments": check_payments_rules,
     "auth": check_auth_rules,
@@ -135,7 +134,6 @@ RULE_CHECKERS = {
 
 
 def check_rules(service: str, stats: dict) -> dict | None:
-    """Entry point — dispatches to the right rule checker for the service."""
     checker = RULE_CHECKERS.get(service)
     if checker is None:
         return None
